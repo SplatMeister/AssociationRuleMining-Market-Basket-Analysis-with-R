@@ -1,0 +1,181 @@
+```{r}
+library(readxl)
+library(arules)
+library(arulesViz)
+library(tidyverse)
+library(knitr)
+library(ggplot2)
+library(lubridate)
+library(plyr)
+library(tidyr)
+library(dplyr)
+library(plyr)
+library(RColorBrewer)
+library(plotly)
+```
+```{r}
+"Loading the data"
+
+data <- read_excel("D:/Data Science/Data Mining/Assignment/Question 1/Online Retail.xlsx", sheet = 1)
+head(data)
+summary(data)
+dim(data)
+```
+```{r}
+'Data Cleaning'
+
+# Remove missing values
+data <- na.omit(data)
+dim(data)
+
+#Remove negative vales
+data <- data[data$Quantity >= 0, ]
+dim(data)
+
+#Remove lowercase values
+data <- data[!grepl("[[:lower:]]", data$Description), ]
+dim(data)
+
+#Remove UnitPrice = 0 values
+data <- data[data$UnitPrice != 0, ]
+dim(data)
+
+# Remove rows where StockCode does not contain any number
+data <- data[grepl("[0-9]", data$StockCode), ]
+dim(data)
+
+#Remove rows as 'C2' from StockCode
+data <- data[data$StockCode != "C2", ]
+dim(data)
+```
+```{r}
+"Using Boxplot to Check for Outliers"
+
+# Create a boxplot for Quantity to see the outliers
+ggplot(data, aes(x="", y=Quantity)) + 
+  geom_boxplot(fill = "#69b3a2", alpha = 0.8) +
+  labs(title = "Boxplot of Quantity (before removing outliers)", y = "Quantity")
+
+# Remove outliers from Quantity column
+data <- data[data$Quantity >= quantile(data$Quantity, 0.25) - 1.5*IQR(data$Quantity) & data$Quantity <= quantile(data$Quantity, 0.75) + 1.5*IQR(data$Quantity),]
+dim(data)
+
+
+# Create a box plot for Quantity
+ggplot(data = data, aes(x = "", y = Quantity)) + 
+  geom_boxplot(fill = "#69b3a2", alpha = 0.8) +
+  labs(title = "Boxplot of Quantity (after removing outliers)", y = "Quantity")
+
+dim(data)
+
+data
+```
+```{r}
+"Data Pre Processing"
+
+data <- data[complete.cases(data), ]
+data <- data %>% mutate(Description = as.factor(Description))
+data <- data %>% mutate(Country = as.factor(Country))
+data$Date <- as.Date(data$InvoiceDate)
+data$Time <- format(data$InvoiceDate,"%H:%M:%S")
+data$InvoiceNo <- as.numeric(as.character(data$InvoiceNo))
+
+```
+```{r}
+# Discretize the Quantity variable into three categories of equal width
+data$Quantity_category <- cut(data$Quantity, breaks = 3, labels = c("Low", "Medium", "High"))
+
+# View the first 10 rows of the data with the new Quantity_category variable
+head(data, 10)
+
+# Create a histogram of the Quantity_category variable
+ggplot(data, aes(x = Quantity_category, fill = Quantity_category)) +
+  geom_bar() +
+  scale_fill_discrete(name = "Quantity category") +
+  labs(title = "Histogram of Quantity Category") +
+  xlab("Quantity Category") +
+  ylab("Count")
+
+```
+```{r}
+
+# Create a new variable for month
+data$Month <- format(data$InvoiceDate, format="%m")
+
+# Count the number of items bought in each month for each quantity category
+item_count <- aggregate(data$Quantity, by = list(data$Month, data$Quantity_category), FUN = sum)
+colnames(item_count) <- c("Month", "Quantity_category", "Item_count")
+
+# Create a stacked bar plot of item count by month and quantity category
+ggplot(item_count, aes(x = Month, y = Item_count, fill = Quantity_category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Items bought in each month for Quantity Categories",
+       x = "Month", y = "Item Count",
+       fill = "Quantity Category")
+```
+
+```{r}
+"Prepare the dataset for association rules mining"
+
+retail_sorted <- data[order(data$CustomerID),]
+itemList <- ddply(data,c("CustomerID","Date"), function(df1)paste(df1$Description, collapse = ","))
+```
+```{r}
+"Remove unnecessary columns and rename the column"
+
+itemList$CustomerID <- NULL
+itemList$Date <- NULL
+colnames(itemList) <- c("items")
+```
+```{r}
+"Write the processed data to a CSV file"
+
+write.csv(itemList,"market_basket.csv", quote = FALSE, row.names = TRUE)
+```
+```{r}
+#Examine the transactions data
+
+print('Description of the transactions')
+tr <- read.transactions('market_basket.csv', format = 'basket', sep=',')
+summary(tr)
+```
+```{r}
+#Create association rules with support of at least 0.2% and confidence of at least 80%
+
+rules <- apriori(tr, parameter = list(supp=0.002, conf=0.8))
+rules <- sort(rules, by='confidence', decreasing = TRUE)
+summary(rules)
+```
+```{r}
+#Inspect the top 10 association rules
+
+inspect(rules[1:10])
+```
+```{r}
+"Association Rule Mining with Minimum Support and Confidence Thresholds"
+
+topRules <- rules[1:10]
+
+
+# Plot the rules using plotly with the lift measure
+plot(topRules, method = "scatter", measure = "lift", engine = "plotly", max = 1000, jitter = 0.1)
+```
+```{r}
+#Plot the top 10 rules using the "grouped" method
+
+plot(topRules, method = "grouped")
+```
+
+```{r}
+#Plot the top 10 rules using the "paralell coordinates" method
+
+plot(topRules, method = "paracoord")
+```
+```{r}
+"Visualizing Top 10 Sub-Rules with High Confidence"
+
+top10subRules <- head(rules, n = 10, by = "confidence")
+plot(top10subRules, method = "graph",  engine = "htmlwidget")
+```
+
+
